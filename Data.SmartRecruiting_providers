@@ -1,0 +1,651 @@
+USE [DEV_WebTrack]
+GO
+/****** Object:  StoredProcedure [data].[spGetSmartRecruitingProviders]    Script Date: 3/4/2019 10:03:09 AM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- [data].[spGetSmartRecruitingProviders] 5086
+ALTER PROCEDURE [data].[spGetSmartRecruitingProviders]
+
+    @ProjectId INT,
+	@rtype nvarchar(25) = NULL
+AS
+
+
+CREATE TABLE #TEMPTABLE_LOAD(
+ProjectId                      INT            ,
+ProjectName                    nvarchar(300)     ,
+ProjectEntityId                INT            ,
+name                           nvarchar(4000)    ,
+EntityType                     nvarchar(60)      ,
+EntityTypeId                   INT            ,
+ProjectEntityType              nvarchar(100)     ,
+ProjectEntityTypeId            INT            ,
+NPI                            nvarchar(20)      ,
+CMSCode                        nvarchar(510)     ,
+CMSGroup                       nvarchar(510)     ,
+TopParentProjectEntityId       INT            ,
+TopParentName                  nvarchar(300)     ,
+TopParentEntityType            nvarchar(60)      ,
+TopParentEntityTypeId          INT            ,
+TopParentProjectEntityType     nvarchar(100)     ,
+TopParentProjectEntityTypeId   INT            ,
+TopParentRecruiter             nvarchar(164)     ,
+TopParentRecruiterId           INT            ,
+TopParentCurrentStatus         nvarchar(100)     ,
+TopParentCurrentStatusId       INT            ,
+TopParentHandlingGroup         nvarchar(100)     ,
+TopParentHandlingGroupId       INT            ,
+TopParentPriority              INT            ,
+AddressId                      INT            ,
+Address1                       nvarchar(4000)    ,
+ActivatedProvider              nvarchar(100)     ,
+Address2                       nvarchar(4000)    ,
+CBSA_Name                      nvarchar(300)     ,
+City                           nvarchar(4000)    ,
+ST                             nvarchar(10)      ,
+ZipCode                        nvarchar(20)      ,
+isprimaryaddress               char(1)            ,
+isoffice                       char(1)            ,
+ContractId                     INT            ,
+ContractStatus                 nvarchar(100)     ,
+Latitude                       decimal(9)        ,
+Longitude                      decimal(9)        ,
+GeoInfo                        nvarchar(100)     ,
+StandardAddress                nvarchar(510)     ,
+StandardCity                   nvarchar(510)     ,
+StandardState                  nvarchar(4)       ,
+StandardZip                    nvarchar(10)      ,
+StandardCounty                 nvarchar(510)     ,
+CountySSA                      nvarchar(20)      ,
+ContractDate                   Date              )
+
+--Truncate table dbo.[SMARTRecruiting_Providers]  -- SD
+
+/* -- SD
+;	WITH RelationshipCTE AS
+	(
+		--This gives everyone that is a parent
+		SELECT pe.ProjectEntityId, 
+			NULL AS ParentProjectEntityId,
+			0 AS EntityLevel, 
+			pe.ProjectEntityId AS TopLevelParentId
+		FROM ProjectEntities pe 
+			INNER JOIN EntityTypes et 
+				ON pe.EntityTypeId = et.EntityTypeId
+			LEFT JOIN EntityRelationships a
+				ON pe.ProjectEntityId = a.ChildProjectEntityId AND a.DeleteDate IS NULL AND a.RelationshipTypeId IS NULL
+			LEFT JOIN ProjectEntities pe1
+				ON a.ParentProjectEntityId = pe1.ProjectEntityId AND pe1.IsInvalid = 0
+		WHERE pe.IsInvalid = 0
+			AND pe.DeleteDate IS NULL
+			AND et.ProjectId = @ProjectId
+		GROUP BY pe.ProjectEntityId
+		HAVING COUNT(pe1.ProjectEntityId) = 0
+
+		UNION ALL
+    
+		SELECT pe.ProjectEntityId, 
+			cte.ProjectEntityId AS ParentProjectEntityId,
+			EntityLevel + 1, 
+			cte.TopLevelParentId
+		FROM RelationshipCTE cte
+			INNER JOIN EntityRelationships er	
+				ON er.ParentProjectEntityId = cte.ProjectEntityId
+			INNER JOIN ProjectEntities pe
+				ON er.ChildProjectEntityId = pe.ProjectEntityId  
+		WHERE pe.IsInvalid = 0 
+			AND pe.DeleteDate IS NULL
+			AND er.DeleteDate IS NULL 
+			AND er.RelationshipTypeId IS NULL
+			AND EntityLevel < 5
+	)
+INSERT INTO [SMARTRecruiting_Providers] (ProjectId, 
+	ProjectName, 
+	ProjectEntityId, 
+	Name,
+	EntityType,
+	EntityTypeId,
+	ProjectEntityType,
+	ProjectEntityTypeId,
+	NPI,
+	CMSCode,
+	CMSGroup,
+	TopParentProjectEntityId,
+	TopParentName,
+	TopParententityType,
+	TopParentEntityTypeId,
+	TopParentProjectEntityType,
+	TopParentProjectEntityTypeId,
+	TopParentRecruiter,
+	TopParentRecruiterId,
+	TopParentCurrentStatus,
+	TopParentCurrentStatusId,
+	TopParentHandlingGroup,
+	TopParentHandlingGroupId,
+	TopParentPriority,
+	AddressId,
+	Address1,
+	ActivatedProvider,
+	Address2,
+	CBSA_Name,
+	City,
+	ST,
+	ZipCode,
+	IsPrimaryAddress,
+	IsOffice,
+	ContractId,
+	ContractStatus,
+	Latitude,
+	Longitude,
+	GeoInfo,
+	StandardAddress,
+	StandardCity,
+	StandardState,
+	StandardZip,
+	StandardCounty,
+	CountySSA, 
+	ContractDate)
+SELECT et.ProjectId, 
+	p.ProjectName, 
+	pe.ProjectEntityId, 
+	pe.NameFormatted AS Name,
+	et.EntityTypeName AS EntityType,
+	et.EntityTypeId,
+	pet.ProjectEntityTypeName AS ProjectEntityType,
+	pet.ProjectEntityTypeId,
+	pe.NpiNum AS NPI,
+	CASE WHEN et.IsPerson = 1 THEN 
+	        CASE WHEN @ProjectId <> 5091 THEN s.CMSCode ELSE s.SpecialtyName END 
+		ELSE 
+		    CASE WHEN @projectID <> 5091 THEN st.CMSCode ELSE st.ServiceTypeName END
+	END AS CMSCode,
+	'' CMSGroup,  -- Will be filled in after the pull
+	peTop.ProjectEntityId AS TopParentProjectEntityId,
+	peTop.NameFormatted AS TopParentName,
+	etTop.EntityTypeName AS TopParententityType,
+	etTop.EntityTypeId AS TopParentEntityTypeId,
+	petTop.ProjectEntityTypeName AS TopParentProjectEntityType,
+	petTop.ProjectEntityTypeId AS TopParentProjectEntityTypeId,
+	u.FormattedName AS TopParentRecruiter,
+	u.UserId AS TopParentRecruiterId,
+	[is].InitialStatusName AS TopParentCurrentStatus,
+	[is].InitialStatusId AS TopParentCurrentStatusId,
+	hg.HandlingGroupName AS TopParentHandlingGroup,
+	hg.HandlingGroupId AS TopParentHandlingGroupId,
+	peTop.Priority AS TopParentPriority,
+	a.AddressId,
+	a.MailAddress AS Address1,
+	NULL AS ActivatedProvider,
+	a.MailAddress2 AS Address2,
+	NULL AS CBSA_Name,
+	a.MailCity AS City,
+	a.MailState AS ST,
+	a.ZipCode AS ZipCode,
+	a.IsPrimaryAddress,
+	a.IsOffice,
+	ec.ContractId,
+	CASE WHEN ec.AcceptDate IS NOT NULL THEN 'Accepted' ELSE 'Open' END AS ContractStatus,
+	NULL AS Latitude,
+	NULL AS Longitude,
+	NULL AS GeoInfo,
+	NULL AS StandardAddress,
+	NULL AS StandardCity,
+	NULL AS StandardState,
+	NULL AS StandardZip,
+	NULL AS StandardCounty,
+	NULL AS CountySSA,
+	DeclineDate AS ContractDate
+FROM ProjectEntities pe
+	INNER JOIN EntityTypes et
+		ON pe.EntityTypeId = et.EntityTypeId
+	INNER JOIN ProjectEntityTypes pet
+		ON pe.ProjectEntityTypeId = pet.ProjectEntityTypeId
+	INNER JOIN Projects p
+		ON et.ProjectId = p.ProjectID
+	LEFT JOIN EntitySpecialties es
+		ON pe.ProjectEntityId = es.ProjectEntityId
+			AND es.DeleteDate IS NULL
+	LEFT JOIN Specialties s
+		ON es.SpecialtyId = s.SpecialtyId
+			/*AND s.CMSCode <> '000' */ -- Filter later it breaks CHIP to filter here...
+	LEFT JOIN EntityServiceTypes est
+		ON pe.ProjectEntityId = est.ProjectEntityId
+			AND est.DeleteDate IS NULL
+	LEFT JOIN ServiceTypes st
+		ON est.ServiceTypeId = st.ServiceTypeId
+			/* AND st.CMSCode <> '000' */ -- Filter later it breaks CHIP to filter here...
+	--Parents
+	INNER JOIN RelationshipCTE tp
+		ON pe.ProjectEntityId = tp.ProjectEntityId
+	INNER JOIN ProjectEntities peTop
+		ON tp.TopLevelParentId = peTop.ProjectEntityId
+	INNER JOIN EntityTypes etTop
+		ON peTop.EntityTypeId = etTop.EntityTypeId
+	INNER JOIN ProjectEntityTypes petTop
+		ON peTop.ProjectEntityTypeId = petTop.ProjectEntityTypeId
+	INNER JOIN Users u
+		ON peTop.RecruiterId = u.UserId
+	INNER JOIN InitialStatus [is]
+		ON peTop.CurrentStatusId = [is].InitialStatusID
+	LEFT JOIN HandlingGroups hg
+		ON peTop.HandlingGroupId = hg.HandlingGroupId
+
+	INNER JOIN wtvwAddresses a
+		ON pe.ProjectEntityId = a.ProjectEntityId
+	INNER JOIN EntityContracts ec
+		ON pe.ProjectEntityId = ec.ProjectEntityId
+	
+WHERE et.ProjectId = @ProjectId
+	AND a.DeleteDate IS NULL
+	AND a.IsOffice = 1
+	AND et.EntityTypeConst <> 'GROUP'
+	AND et.EntityTypeConst <> 'PARENTORGANIZA'
+	AND ec.DeleteDate IS NULL
+	AND ec.AcceptDate IS NULL
+*/ -- SD
+-- Delete anyone that doesn't have a valid CMSCode
+/*DELETE FROM [SMARTRecruiting_Providers] where
+  CMSCode is NULL   */
+
+
+  -- Code chnage for XXXXX
+
+
+
+;WITH RelationshipCTE AS
+	(
+		--This gives everyone that is a parent
+		SELECT pe.ProjectEntityId, 
+			NULL AS ParentProjectEntityId,
+			0 AS EntityLevel, 
+			pe.ProjectEntityId AS TopLevelParentId
+		FROM ProjectEntities pe 
+			INNER JOIN EntityTypes et 
+				ON pe.EntityTypeId = et.EntityTypeId
+			LEFT JOIN EntityRelationships a
+				ON pe.ProjectEntityId = a.ChildProjectEntityId AND a.DeleteDate IS NULL AND a.RelationshipTypeId IS NULL
+			LEFT JOIN ProjectEntities pe1
+				ON a.ParentProjectEntityId = pe1.ProjectEntityId AND pe1.IsInvalid = 0
+		WHERE pe.IsInvalid = 0
+			AND pe.DeleteDate IS NULL
+			AND et.ProjectId =  @ProjectId 
+		GROUP BY pe.ProjectEntityId
+		HAVING COUNT(pe1.ProjectEntityId) = 0
+
+		UNION ALL
+    
+		SELECT pe.ProjectEntityId, 
+			cte.ProjectEntityId AS ParentProjectEntityId,
+			EntityLevel + 1, 
+			cte.TopLevelParentId
+		FROM RelationshipCTE cte
+			INNER JOIN EntityRelationships er	
+				ON er.ParentProjectEntityId = cte.ProjectEntityId
+			INNER JOIN ProjectEntities pe
+				ON er.ChildProjectEntityId = pe.ProjectEntityId  
+		WHERE pe.IsInvalid = 0 
+			AND pe.DeleteDate IS NULL
+			AND er.DeleteDate IS NULL 
+			AND er.RelationshipTypeId IS NULL
+			AND EntityLevel < 5
+	)
+INSERT INTO [#TEMPTABLE_LOAD]
+SELECT DISTINCT et.ProjectId, 
+	p.ProjectName, 
+	pe.ProjectEntityId, 
+	pe.NameFormatted AS Name,
+	et.EntityTypeName AS EntityType,
+	et.EntityTypeId,
+	pet.ProjectEntityTypeName AS ProjectEntityType,
+	pet.ProjectEntityTypeId,
+	pe.NpiNum AS NPI,
+	CASE WHEN et.IsPerson = 1 THEN 
+	        CASE WHEN  @ProjectId  <> 5091 THEN s.CMSCode ELSE s.SpecialtyName END 
+		ELSE 
+		    CASE WHEN  @ProjectId  <> 5091 THEN st.CMSCode ELSE st.ServiceTypeName END
+	END AS CMSCode,
+	'' CMSGroup,  -- Will be filled in after the pull
+	peTop.ProjectEntityId AS TopParentProjectEntityId,
+	peTop.NameFormatted AS TopParentName,
+	etTop.EntityTypeName AS TopParententityType,
+	etTop.EntityTypeId AS TopParentEntityTypeId,
+	petTop.ProjectEntityTypeName AS TopParentProjectEntityType,
+	petTop.ProjectEntityTypeId AS TopParentProjectEntityTypeId,
+	u.FormattedName AS TopParentRecruiter,
+	u.UserId AS TopParentRecruiterId,
+	[is].InitialStatusName AS TopParentCurrentStatus,
+	[is].InitialStatusId AS TopParentCurrentStatusId,
+	hg.HandlingGroupName AS TopParentHandlingGroup,
+	hg.HandlingGroupId AS TopParentHandlingGroupId,
+	peTop.Priority AS TopParentPriority,
+	a.AddressId,
+	a.MailAddress AS Address1,
+	NULL AS ActivatedProvider,
+	a.MailAddress2 AS Address2,
+	NULL AS CBSA_Name,
+	a.MailCity AS City,
+	a.MailState AS ST,
+	a.ZipCode AS ZipCode,
+	a.IsPrimaryAddress,
+	a.IsOffice,
+	ec.ContractId,
+	CASE WHEN ec.AcceptDate IS NOT NULL THEN 'Accepted' ELSE 'Open' END AS ContractStatus,
+	NULL AS Latitude,
+	NULL AS Longitude,
+	NULL AS GeoInfo,
+	NULL AS StandardAddress,
+	NULL AS StandardCity,
+	NULL AS StandardState,
+	NULL AS StandardZip,
+	NULL AS StandardCounty,
+	NULL AS CountySSA,
+	DeclineDate AS ContractDate
+FROM ProjectEntities pe
+	INNER JOIN EntityTypes et
+		ON pe.EntityTypeId = et.EntityTypeId
+	INNER JOIN ProjectEntityTypes pet
+		ON pe.ProjectEntityTypeId = pet.ProjectEntityTypeId
+	INNER JOIN Projects p
+		ON et.ProjectId = p.ProjectID
+	LEFT JOIN EntitySpecialties es
+		ON pe.ProjectEntityId = es.ProjectEntityId
+			AND es.DeleteDate IS NULL
+	LEFT JOIN Specialties s
+		ON es.SpecialtyId = s.SpecialtyId
+			/*AND s.CMSCode <> '000' */ -- Filter later it breaks CHIP to filter here...
+	LEFT JOIN EntityServiceTypes est
+		ON pe.ProjectEntityId = est.ProjectEntityId
+			AND est.DeleteDate IS NULL
+	LEFT JOIN ServiceTypes st
+		ON est.ServiceTypeId = st.ServiceTypeId
+			/* AND st.CMSCode <> '000' */ -- Filter later it breaks CHIP to filter here...
+	--Parents
+	INNER JOIN RelationshipCTE tp
+		ON pe.ProjectEntityId = tp.ProjectEntityId
+	INNER JOIN ProjectEntities peTop
+		ON tp.TopLevelParentId = peTop.ProjectEntityId
+	INNER JOIN EntityTypes etTop
+		ON peTop.EntityTypeId = etTop.EntityTypeId
+	INNER JOIN ProjectEntityTypes petTop
+		ON peTop.ProjectEntityTypeId = petTop.ProjectEntityTypeId
+	INNER JOIN Users u
+		ON peTop.RecruiterId = u.UserId
+	INNER JOIN InitialStatus [is]
+		ON peTop.CurrentStatusId = [is].InitialStatusID
+	LEFT JOIN HandlingGroups hg
+		ON peTop.HandlingGroupId = hg.HandlingGroupId
+	INNER JOIN wtvwAddresses a
+		ON pe.ProjectEntityId = a.ProjectEntityId
+	INNER JOIN EntityContracts ec
+		ON pe.ProjectEntityId = ec.ProjectEntityId	
+WHERE et.ProjectId =  @ProjectId 
+	AND a.DeleteDate IS NULL
+	AND a.IsOffice = 1
+	AND et.EntityTypeConst <> 'GROUP'
+	AND et.EntityTypeConst <> 'PARENTORGANIZA'
+	AND ec.DeleteDate IS NULL
+
+
+
+	MERGE [SMARTRecruiting_Providers] TRG
+	USING (SELECT * FROM [#TEMPTABLE_LOAD]	)  SRC
+		ON TRG.ProjectId  = SRC.ProjectId
+		    AND SRC.ProjectId = @ProjectId
+			--AND SRC.CMSCode IS NOT NULL
+			AND ISNULL(SRC.ProjectName,'0')                  =  ISNULL(TRG.ProjectName,'0')
+			AND ISNULL(SRC.ProjectEntityId,0)              =  ISNULL(TRG.ProjectEntityId,0)
+			AND ISNULL(SRC.Name,'0')                         =  ISNULL(TRG.Name,'0')
+			AND ISNULL(SRC.EntityType,'0')                   =  ISNULL(TRG.EntityType,'0')
+			AND ISNULL(SRC.EntityTypeId ,0)                =  ISNULL(TRG.EntityTypeId,0)
+			AND ISNULL(SRC.ProjectEntityType,'0')            =  ISNULL(TRG.ProjectEntityType,'0')
+			AND ISNULL(SRC.ProjectEntityTypeId ,0)         =  ISNULL(TRG.ProjectEntityTypeId,0)
+			AND ISNULL(SRC.NPI,'0')                          =  ISNULL(TRG.NPI,'0')
+			AND ISNULL(SRC.CMSCode,'0')                      =  ISNULL(TRG.CMSCode,'0')
+			AND ISNULL(SRC.CMSGroup ,'0')                    =  ISNULL(TRG.CMSGroup,'0')
+			AND ISNULL(SRC.TopParentProjectEntityId,0)     =  ISNULL(TRG.TopParentProjectEntityId,0)
+			AND ISNULL(SRC.TopParentName,'0')                =  ISNULL(TRG.TopParentName,'0')
+			AND ISNULL(SRC.TopParententityType,'0')          =  ISNULL(TRG.TopParententityType,'0')
+			AND ISNULL(SRC.TopParentEntityTypeId ,0)       =  ISNULL(TRG.TopParentEntityTypeId,0)
+			AND ISNULL(SRC.TopParentProjectEntityType,'0')   =  ISNULL(TRG.TopParentProjectEntityType,'0')
+			AND ISNULL(SRC.TopParentProjectEntityTypeId,0) =  ISNULL(TRG.TopParentProjectEntityTypeId,0)
+			AND ISNULL(SRC.TopParentRecruiter ,'0')          =  ISNULL(TRG.TopParentRecruiter,'0')
+			AND ISNULL(SRC.TopParentRecruiterId,0)         =  ISNULL(TRG.TopParentRecruiterId,0)
+			AND ISNULL(SRC.TopParentCurrentStatus,'0')       =  ISNULL(TRG.TopParentCurrentStatus,'0')
+			AND ISNULL(SRC.TopParentCurrentStatusId,0)     =  ISNULL(TRG.TopParentCurrentStatusId,0)
+			AND ISNULL(SRC.TopParentHandlingGroup  ,'0')     =  ISNULL(TRG.TopParentHandlingGroup,'0')
+			AND ISNULL(SRC.TopParentHandlingGroupId ,0)    =  ISNULL(TRG.TopParentHandlingGroupId,0)
+			AND ISNULL(SRC.TopParentPriority ,0)           =  ISNULL(TRG.TopParentPriority,0)
+			AND ISNULL(SRC.AddressId ,0)                   =  ISNULL(TRG.AddressId,0)
+			AND ISNULL(SRC.Address1  ,'0')                   =  ISNULL(TRG.Address1,'0')
+			AND ISNULL(SRC.ActivatedProvider,'0')            =  ISNULL(TRG.ActivatedProvider,'0')
+			AND ISNULL(SRC.Address2   ,'0')                  =  ISNULL(TRG.Address2,'0')
+			AND ISNULL(SRC.CBSA_Name ,'0')                   =  ISNULL(TRG.CBSA_Name,'0')
+			AND ISNULL(SRC.City  ,'0')                       =  ISNULL(TRG.City,'0')
+			AND ISNULL(SRC.ST  ,'0')                         =  ISNULL(TRG.ST,'0')
+			AND ISNULL(SRC.ZipCode ,'0')                     =  ISNULL(TRG.ZipCode,'0')
+			AND ISNULL(SRC.IsPrimaryAddress ,'0')            =  ISNULL(TRG.IsPrimaryAddress,'0')
+			AND ISNULL(SRC.IsOffice    ,'0')                 =  ISNULL(TRG.IsOffice,'0')
+			AND ISNULL(SRC.ContractId  ,0)                 =  ISNULL(TRG.ContractId,0)
+			AND ISNULL(SRC.ContractStatus ,'0')              =  ISNULL(TRG.ContractStatus,'0')              
+			AND ISNULL(SRC.Latitude,0)                     =   ISNULL(TRG.Latitude,0)                     
+			AND ISNULL(SRC.Longitude,0)                    =   ISNULL(TRG.Longitude,0)                    
+			AND ISNULL(SRC.GeoInfo,'0')                      =   ISNULL(TRG.GeoInfo,'0')                      
+			AND ISNULL(SRC.StandardAddress,'0')              =   ISNULL(TRG.StandardAddress,'0')              
+			AND ISNULL(SRC.StandardCity,'0')                 =   ISNULL(TRG.StandardCity,'0')                 
+			AND ISNULL(SRC.StandardState,'0')                =   ISNULL(TRG.StandardState,'0')                
+			AND ISNULL(SRC.StandardZip,'0')                  =   ISNULL(TRG.StandardZip,'0')                  
+			AND ISNULL(SRC.StandardCounty,'0')               =   ISNULL(TRG.StandardCounty,'0')               
+			AND ISNULL(SRC.CountySSA,'0')                    =   ISNULL(TRG.CountySSA,'0')                    
+			AND ISNULL(SRC.ContractDate,sysdatetime())                 =   ISNULL(TRG.ContractDate ,SYSDATETIME())               
+	WHEN MATCHED THEN
+	  UPDATE
+	  SET TRG.ProjectId                    = SRC.ProjectId                    ,
+	TRG.ProjectName                  = SRC.ProjectName                  ,
+	TRG.ProjectEntityId              = SRC.ProjectEntityId              ,
+	TRG.Name                         = SRC.Name                         ,
+	TRG.EntityType                   = SRC.EntityType                   ,
+	TRG.EntityTypeId                 = SRC.EntityTypeId                 ,
+	TRG.ProjectEntityType            = SRC.ProjectEntityType            ,
+	TRG.ProjectEntityTypeId          = SRC.ProjectEntityTypeId          ,
+	TRG.NPI                          = SRC.NPI                          ,
+	TRG.CMSCode                      = SRC.CMSCode                      ,
+	TRG.CMSGroup                     = SRC.CMSGroup                     ,
+	TRG.TopParentProjectEntityId     = SRC.TopParentProjectEntityId     ,
+	TRG.TopParentName                = SRC.TopParentName                ,
+	TRG.TopParententityType          = SRC.TopParententityType          ,
+	TRG.TopParentEntityTypeId        = SRC.TopParentEntityTypeId        ,
+	TRG.TopParentProjectEntityType   = SRC.TopParentProjectEntityType   ,
+	TRG.TopParentProjectEntityTypeId = SRC.TopParentProjectEntityTypeId ,
+	TRG.TopParentRecruiter           = SRC.TopParentRecruiter           ,
+	TRG.TopParentRecruiterId         = SRC.TopParentRecruiterId         ,
+	TRG.TopParentCurrentStatus       = SRC.TopParentCurrentStatus       ,
+	TRG.TopParentCurrentStatusId     = SRC.TopParentCurrentStatusId     ,
+	TRG.TopParentHandlingGroup       = SRC.TopParentHandlingGroup       ,
+	TRG.TopParentHandlingGroupId     = SRC.TopParentHandlingGroupId     ,
+	TRG.TopParentPriority            = SRC.TopParentPriority            ,
+	TRG.AddressId                    = SRC.AddressId                    ,
+	TRG.Address1                     = SRC.Address1                     ,
+	TRG.ActivatedProvider            = SRC.ActivatedProvider            ,
+	TRG.Address2                     = SRC.Address2                     ,
+	TRG.CBSA_Name                    = SRC.CBSA_Name                    ,
+	TRG.City                         = SRC.City                         ,
+	TRG.ST                           = SRC.ST                           ,
+	TRG.ZipCode                      = SRC.ZipCode                      ,
+	TRG.IsPrimaryAddress             = SRC.IsPrimaryAddress             ,
+	TRG.IsOffice                     = SRC.IsOffice                     ,
+	TRG.ContractId                   = SRC.ContractId                   ,
+	TRG.ContractStatus               = SRC.ContractStatus               ,
+	TRG.Latitude                     = SRC.Latitude                     ,
+	TRG.Longitude                    = SRC.Longitude                    ,
+	TRG.GeoInfo                      = SRC.GeoInfo                      ,
+	TRG.StandardAddress              = SRC.StandardAddress              ,
+	TRG.StandardCity                 = SRC.StandardCity                 ,
+	TRG.StandardState                = SRC.StandardState                ,
+	TRG.StandardZip                  = SRC.StandardZip                  ,
+	TRG.StandardCounty               = SRC.StandardCounty               ,
+	TRG.CountySSA                    = SRC.CountySSA                    ,
+	TRG.ContractDate                 = SRC.ContractDate                 
+	WHEN NOT MATCHED  THEN
+	  INSERT (ProjectId, 
+		ProjectName, 
+		ProjectEntityId, 
+		Name,
+		EntityType,
+		EntityTypeId,
+		ProjectEntityType,
+		ProjectEntityTypeId,
+		NPI,
+		CMSCode,
+		CMSGroup,
+		TopParentProjectEntityId,
+		TopParentName,
+		TopParententityType,
+		TopParentEntityTypeId,
+		TopParentProjectEntityType,
+		TopParentProjectEntityTypeId,
+		TopParentRecruiter,
+		TopParentRecruiterId,
+		TopParentCurrentStatus,
+		TopParentCurrentStatusId,
+		TopParentHandlingGroup,
+		TopParentHandlingGroupId,
+		TopParentPriority,
+		AddressId,
+		Address1,
+		ActivatedProvider,
+		Address2,
+		CBSA_Name,
+		City,
+		ST,
+		ZipCode,
+		IsPrimaryAddress,
+		IsOffice,
+		ContractId,
+		ContractStatus,
+		Latitude,
+		Longitude,
+		GeoInfo,
+		StandardAddress,
+		StandardCity,
+		StandardState,
+		StandardZip,
+		StandardCounty,
+		CountySSA, 
+		ContractDate)
+	  VALUES (SRC.ProjectId                    ,
+	SRC.ProjectName                  ,
+	SRC.ProjectEntityId              ,
+	SRC.Name                         ,
+	SRC.EntityType                   ,
+	SRC.EntityTypeId                 ,
+	SRC.ProjectEntityType            ,
+	SRC.ProjectEntityTypeId          ,
+	SRC.NPI                          ,
+	SRC.CMSCode                      ,
+	SRC.CMSGroup                     ,
+	SRC.TopParentProjectEntityId     ,
+	SRC.TopParentName                ,
+	SRC.TopParententityType          ,
+	SRC.TopParentEntityTypeId        ,
+	SRC.TopParentProjectEntityType   ,
+	SRC.TopParentProjectEntityTypeId ,
+	SRC.TopParentRecruiter           ,
+	SRC.TopParentRecruiterId         ,
+	SRC.TopParentCurrentStatus       ,
+	SRC.TopParentCurrentStatusId     ,
+	SRC.TopParentHandlingGroup       ,
+	SRC.TopParentHandlingGroupId     ,
+	SRC.TopParentPriority            ,
+	SRC.AddressId                    ,
+	SRC.Address1                     ,
+	SRC.ActivatedProvider            ,
+	SRC.Address2                     ,
+	SRC.CBSA_Name                    ,
+	SRC.City                         ,
+	SRC.ST                           ,
+	SRC.ZipCode                      ,
+	SRC.IsPrimaryAddress             ,
+	SRC.IsOffice                     ,
+	SRC.ContractId                   ,
+	SRC.ContractStatus               ,
+	SRC.Latitude                     ,
+	SRC.Longitude                    ,
+	SRC.GeoInfo                      ,
+	SRC.StandardAddress              ,
+	SRC.StandardCity                 ,
+	SRC.StandardState                ,
+	SRC.StandardZip                  ,
+	SRC.StandardCounty               ,
+	SRC.CountySSA                    ,
+	SRC.ContractDate                 
+	);
+
+ DELETE [#TEMPTABLE_LOAD];
+
+-- Project Specific Requirements
+if @ProjectId = 5086
+  BEGIN
+ 	if @rtype = 'Amerigroup'
+	  BEGIN
+	     DELETE [SMARTRecruiting_Providers]
+			WHERE ContractID IN (281, 285, 284, 301)
+	  END
+	ELSE IF @rtype = 'IA'
+	  BEGIN
+	    DELETE [SMARTRecruiting_Providers]
+			where ContractID IN (284, 301)
+	  END
+	ELSE IF @rtype = 'IL-MO'
+	  BEGIN
+	    DELETE [SMARTRecruiting_Providers] 
+			WHERE ContractId not in (284, 301, 306)
+	  END
+   END
+ELSE IF @ProjectId = 5079
+  BEGIN
+    if @rtype is NULL or @rtype <> 'Medallion'
+	  BEGIN
+	  	DELETE [SMARTRecruiting_Providers]
+		   WHERE ContractID IN (259, 271, 319, 304)
+	  END
+	ELSE IF @rtype = 'Medallion'
+	  BEGIN
+	    -- Glenridge is not recruiting for Medallion if they accepted anything other than LOI prior to 3/1/2018
+	  	DELETE [SMARTRecruiting_Providers]
+		   WHERE ProjectEntityId in (
+		     select distinct ProjectEntityId
+				from EntityContracts ec
+				JOIN Contracts con
+				  on ec.ContractId = con.ContractID
+			    WHERE con.projectID = 5079
+				  and ec.DeleteDate is NULL
+				  and ec.AcceptDate is not NULL
+			      and ec.ContractId  not in (319, 259)
+				  and ec.AcceptDate < '2018-03-01')
+	 END
+  END
+ELSE IF @ProjectId = 5091
+   BEGIN
+     if @rtype = 'STAR'
+	  BEGIN
+	     DELETE [SMARTRecruiting_Providers]
+			WHERE ContractID IN (328)
+			  OR (ContractId in (327) and EXISTS (
+			      select 1 from EntityDates ed  
+				     where ed.ProjectEntityId = SMARTRecruiting_Providers.ProjectEntityId 
+					   and ed.DeleteDate is NULL and ed.ProjectDateId in (503, 504)
+					   and ed.DateValue > '1900-01-02'))
+	  END
+	 ELSE IF @rtype = 'CHIP'
+	  BEGIN
+	    DELETE [SMARTRecruiting_Providers]
+			where ContractID IN (326)
+			  OR (ContractId in (327) and EXISTS (
+			      select 1 from EntityDates ed  
+				     where ed.ProjectEntityId = SMARTRecruiting_Providers.ProjectEntityId 
+					   and ed.DeleteDate is NULL and ed.ProjectDateId in (503, 504)
+					   and ed.DateValue > '1900-01-02'))
+	  END
+  END
